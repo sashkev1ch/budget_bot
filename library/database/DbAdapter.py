@@ -4,7 +4,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.exc import NoResultFound
 from library.database.models import Base
 from library.database.models.schema import *
-
+import decimal
 
 class DbAdapter:
     def __init__(self, host, user, password, database):
@@ -94,7 +94,7 @@ class DbAdapter:
                     Currencies.currency_short_name == curr_short
                 ).one()
 
-                blnc.amount += amount
+                blnc.amount += decimal.Decimal(amount)
                 blnc.change_date = datetime.now()
 
             except NoResultFound:
@@ -103,7 +103,7 @@ class DbAdapter:
                 ).one()
                 blnc = Balances(
                     tg_tg_id=telegram_id,
-                    amount=amount,
+                    amount=decimal.Decimal(amount),
                     curr_curr_id=curr_id[0]
                 )
                 s.add(blnc)
