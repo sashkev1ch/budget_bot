@@ -1,5 +1,5 @@
 from datetime import datetime, date
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, func
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.exc import NoResultFound
 from library.database.models import Base
@@ -18,7 +18,7 @@ class DbAdapter:
             f"{self._user}:"
             f"{self._password}@{self._host}:"
             f"5432/{self._database}",
-            echo=True
+            echo=False
         )
 
     def get_session(self):
@@ -33,17 +33,17 @@ class DbAdapter:
                     [
                         Currencies(
                             currency_name="Ruble",
-                            currency_short_name="rub",
+                            currency_short_name="RUB",
                             currency_sign="₽"
                         ),
                         Currencies(
-                            currency_name="Lira",
-                            currency_short_name='tl',
+                            currency_name="Turkish Lira",
+                            currency_short_name='TRY',
                             currency_sign="₺"
                         ),
                         Currencies(
                             currency_name="Dollar",
-                            currency_short_name='usd',
+                            currency_short_name='USD',
                             currency_sign="$"
                         )
                     ]
@@ -109,3 +109,65 @@ class DbAdapter:
                 s.add(blnc)
             finally:
                 s.commit()
+
+    def get_balance(self, telegram_id):
+        with self.get_session() as s:
+            result = s.query(
+                Users.user_name,
+                Balances.amount,
+                Currencies.currency_short_name,
+                Currencies.currency_sign
+            ).filter(
+                Users.tg_id == Balances.tg_tg_id,
+                Balances.curr_curr_id == Currencies.curr_id,
+                Users.tg_id == telegram_id
+            ).all()
+
+        return result
+
+    def get_last_exchange_date(self, from_, to_):
+        with self.get_session() as s:
+            try:
+                result = s.query(
+                    func.max(ExchangeRates.rate_date)
+                ).filter(
+                    ExchangeRates.currency_from == from_,
+                    ExchangeRates.currency_to == to_
+                ).group_by(
+                    ExchangeRates.currency_from,
+                    ExchangeRates.currency_to
+                ).one()
+            except NoResultFound:
+                print(f"get_last_exchange_date: NoResultFound")
+                result = None
+            finally:
+                return result
+
+    def get_last_exchange_rate(self, from_, to_):
+        with self.get_session() as s:
+            ex_date = self.get_last_exchange_date(from_, to_)
+            try:
+                result = s.query(
+                    ExchangeRates
+                ).filter(
+                    ExchangeRates.currency_from == from_,
+                    ExchangeRates.currency_to == to_,
+                    ExchangeRates.rate_date == ex_date[0]
+                ).one()
+            except NoResultFound:
+                result = None
+        return result
+
+    def save_exchange_rate(self, from_, to_, exchange_date, rate_value):
+        with self.get_session() as s:
+            prev_rate = self.get_last_exchange_date(from_, to_)
+            if prev_rate is None or prev_rate[0] < exchange_date:
+                rate = ExchangeRates(
+                    currency_from=from_,
+                    currency_to=to_,
+                    rate_date=exchange_date,
+                    ex_rate=rate_value
+                )
+                s.add(rate)
+                s.commit()
+

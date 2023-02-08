@@ -1,6 +1,6 @@
 import logging
 from pathlib import Path
-from library import BotClient
+from library import BotClient, BotExchanges
 from library.database import DbAdapter
 from yaml import load, FullLoader
 
@@ -25,10 +25,16 @@ db.init_db(
     admin_name=config['bot']['admin_name']
 )
 
+exchanges = BotExchanges(
+    api_key=config['api']['api_key'],
+    db=db
+)
+
 bot = BotClient(
     token=config['bot']['token'],
     admin_id=config['bot']['admin_id'],
-    db=db
+    db=db,
+    exchanges=exchanges
 )
 bot.init_bot()
 
