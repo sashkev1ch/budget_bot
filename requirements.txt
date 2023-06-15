@@ -1,0 +1,5 @@
+sqlalchemy==2.0.16
+python-telegram-bot==20.3
+PyYAML
+requests
+psycopg2==2.9.6
