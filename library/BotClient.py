@@ -1,7 +1,7 @@
 from datetime import datetime as dt
 from telegram.ext import Application, ContextTypes, CommandHandler
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
-from .constants import HELP_MESSAGE
+from .constants import HELP_MESSAGE, DEFAULT_CURRENCY, DEFAULT_EXCEPTION_REPLY
 
 
 def get_keyboard(buttons):
@@ -63,22 +63,28 @@ class BotClient:
             await update.message.reply_text(f"Hi {admin_name}")
 
     async def add(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        reply = ""
         user = self.check_cache(update.message.from_user.id)
+        reply = DEFAULT_EXCEPTION_REPLY
         if user:
             cmd_args = context.args
-            if len(cmd_args) == 2:
+
+            try:
+                amount = float(cmd_args[0])
+                try:
+                    currency = cmd_args[1].upper()
+                except IndexError:
+                    currency = DEFAULT_CURRENCY
+
                 self._db.update_balance(
                     telegram_id=user.tg_id,
-                    curr_short=cmd_args[1].upper(),
-                    amount=float(cmd_args[0])
+                    curr_short=currency,
+                    amount=amount
                 )
-                reply += f"added {cmd_args[0]} {cmd_args[1]}\r\n"
-                reply += self._get_balance_str(user.tg_id)
-            else:
-                reply += f"not enough arguments: {cmd_args}"
-        else:
-            reply += f"unknown user: {update.message.from_user}"
+                balance = self._get_balance_str(user.tg_id)
+                reply = f"added {amount} {currency}\r\n{balance}"
+
+            except IndexError:
+                reply = f"not enough arguments: {cmd_args}"
 
         await update.message.reply_text(f"{reply}")
 
@@ -160,7 +166,7 @@ class BotClient:
                     self.update_cache()
                     reply = f"new user {new_user_name} created"
                 else:
-                    reply = "something went wrong"
+                    reply = DEFAULT_EXCEPTION_REPLY
 
             except IndexError:
                 reply = "No user name passed"
@@ -191,7 +197,7 @@ class BotClient:
                     self.update_cache()
                     reply = "User dropped"
                 else:
-                    reply = "something went wrong"
+                    reply = DEFAULT_EXCEPTION_REPLY
 
             except IndexError:
                 reply = "No Telegram Id passed"

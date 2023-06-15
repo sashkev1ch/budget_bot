@@ -8,3 +8,7 @@ HELP_MESSAGE = """Чат бот для учёта финансов
 
 Можно передать просто сумму и тогда она учтётся на счёте по умолчанию
 """
+
+DEFAULT_CURRENCY = 'RUB'
+
+DEFAULT_EXCEPTION_REPLY = "something went wrong"
