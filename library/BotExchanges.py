@@ -35,7 +35,6 @@ class BotExchanges:
             )
 
         exchange_rate = self._db.get_last_exchange_rate(from_, to_)
-        # from_amount = 0
         new_amount = 0
         balances = self._db.get_balance(telegram_id)
         for blnc in balances:
@@ -46,12 +45,7 @@ class BotExchanges:
         self._db.update_balance(telegram_id, from_, -old_amount)
 
     def get_symbols(self):
-        r = requests.get(f"https://api.apilayer.com/fixer/symbols",
+        r = requests.get("https://api.apilayer.com/fixer/symbols",
                          headers={"apikey": self._key})
         res = r.text
         print(res['rates'])
-
-#
-# exch = BotExchanges("thGxvRacd0WgirvJwLyHensTaN6nA8yE")
-# exch.get_exchange_rate('USD', 'TRY')
-# # exch.get_symbols()

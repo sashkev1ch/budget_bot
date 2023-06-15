@@ -3,8 +3,9 @@ from sqlalchemy import create_engine, func
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.exc import NoResultFound
 from library.database.models import Base
-from library.database.models.schema import *
+from library.database.models.schema import Balances, Currencies, ExchangeRates, Users
 import decimal
+
 
 class DbAdapter:
     def __init__(self, host, user, password, database):
@@ -49,7 +50,7 @@ class DbAdapter:
                     ]
                 )
             try:
-                adm = s.query(Users).filter(Users.tg_id == admin_id).one()
+                s.query(Users).filter(Users.tg_id == admin_id).one()
             except NoResultFound:
                 admin = Users(
                     tg_id=admin_id,
@@ -125,6 +126,13 @@ class DbAdapter:
 
         return result
 
+    def get_currencies(self):
+        with self.get_session() as s:
+            result = s.query(
+                Currencies.currency_short_name
+            ).all()
+        return result
+
     def get_last_exchange_date(self, from_, to_):
         with self.get_session() as s:
             try:
@@ -138,10 +146,10 @@ class DbAdapter:
                     ExchangeRates.currency_to
                 ).one()
             except NoResultFound:
-                print(f"get_last_exchange_date: NoResultFound")
+                print("get_last_exchange_date: NoResultFound")
                 result = None
-            finally:
-                return result
+
+            return result
 
     def get_last_exchange_rate(self, from_, to_):
         with self.get_session() as s:
@@ -171,3 +179,38 @@ class DbAdapter:
                 s.add(rate)
                 s.commit()
 
+    def create_user(self, user_name, user_tg_id, admin_yn):
+        with self.get_session() as s:
+            user = Users(
+                tg_id=user_tg_id,
+                user_name=user_name,
+                admin_yn=admin_yn
+            )
+            s.add(user)
+            user_balance = Balances(
+                tg_tg_id=user_tg_id,
+                curr_curr_id=1
+            )
+            s.add(user_balance)
+            s.commit()
+
+        return True
+
+    def drop_user(self, telegram_id):
+        with self.get_session() as s:
+            try:
+                # get objects
+                balances = s.query(Balances).filter_by(tg_tg_id=telegram_id).all()
+                user = s.query(Users).filter_by(tg_id=telegram_id).one()
+
+                # delete objects
+                for balance in balances:
+                    s.delete(balance)
+
+                s.delete(user)
+
+                s.commit()
+            except Exception as err:
+                print(err)
+                return False
+        return True
