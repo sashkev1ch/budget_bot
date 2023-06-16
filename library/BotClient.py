@@ -1,7 +1,8 @@
-from datetime import datetime as dt
-from telegram.ext import Application, ContextTypes, CommandHandler
-from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
+from pathlib import Path
+from telegram.ext import Application, ContextTypes, CommandHandler, MessageHandler, filters
+from telegram import Update, InlineKeyboardMarkup
 from .constants import HELP_MESSAGE, DEFAULT_CURRENCY, DEFAULT_EXCEPTION_REPLY
+from .utils import make_excel
 
 
 def get_keyboard(buttons):
@@ -20,6 +21,7 @@ class BotClient:
     def init_bot(self):
         try:
             self._app = Application.builder().token(self._token).build()
+
             start_handler = CommandHandler('start', self.start)
             balance_handler = CommandHandler('balance', self.balance)
             add_handler = CommandHandler('add', self.add)
@@ -30,21 +32,49 @@ class BotClient:
             show_users_handler = CommandHandler('show_users', self.show_users)
             add_user_handler = CommandHandler('add_user', self.add_user)
             del_user_handler = CommandHandler('del_user', self.del_user)
-            self._app.add_handler(start_handler)
-            self._app.add_handler(balance_handler)
-            self._app.add_handler(add_handler)
-            self._app.add_handler(sub_handler)
-            self._app.add_handler(convert_handler)
-            self._app.add_handler(help_handler)
-            self._app.add_handler(currencies_handler)
-            self._app.add_handler(show_users_handler)
-            self._app.add_handler(add_user_handler)
-            self._app.add_handler(del_user_handler)
+            balance_history_handler = CommandHandler('history', self.get_balance_history)
+            self._app.add_handlers(
+                [
+                    start_handler,
+                    balance_handler,
+                    add_handler,
+                    sub_handler,
+                    convert_handler,
+                    help_handler,
+                    currencies_handler,
+                    show_users_handler,
+                    add_user_handler,
+                    del_user_handler,
+                    balance_history_handler,
+                    MessageHandler(filters.TEXT, self.fast_add)
+                ]
+            )
             self.update_cache()
             self._app.run_polling()
         except Exception as e:
             print(f"init_bot: {e}")
             raise
+
+    async def fast_add(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        amount = None
+        try:
+            amount = int(update.message.text)
+
+        except ValueError:
+            await update.message.reply_text(update.message.text)
+
+        user = self.check_cache(update.message.from_user.id)
+
+        if user and amount:
+            self._db.update_balance(
+                telegram_id=user.tg_id,
+                curr_short=DEFAULT_CURRENCY,
+                amount=amount
+            )
+            balance = self._get_balance_str(user.tg_id)
+            reply = f"{DEFAULT_CURRENCY} balance updated for {amount}\r\n{balance}"
+
+            await update.message.reply_text(reply)
 
     def update_cache(self):
         self._cache_users = self._db.get_bot_users()
@@ -203,3 +233,28 @@ class BotClient:
                 reply = "No Telegram Id passed"
 
             await update.message.reply_text(reply)
+
+    async def get_balance_history(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user = self.check_cache(update.message.from_user.id)
+        if user:
+            try:
+                currency = context.args[0].upper()
+            except IndexError:
+                currency = DEFAULT_CURRENCY
+
+            balances = self._db.get_balance_history(user.tg_id, currency)
+            history = [
+                (
+                    balance.change_date,
+                    balance.update_value,
+                    balance.amount
+                )
+                for balance in balances
+            ]
+            file_path = Path(__file__).parent.resolve() /'..' / 'budget_reports' / 'budget.xlsx'
+            make_excel(file_path, history)
+            budget_file = open(file_path, 'rb')
+            await context.bot.send_document(
+                chat_id=user.tg_id,
+                document=budget_file
+            )

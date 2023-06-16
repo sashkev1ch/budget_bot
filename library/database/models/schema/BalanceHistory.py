@@ -4,14 +4,13 @@ from datetime import datetime
 from library.database.models import Base
 
 
-class Balances(Base):
-    __tablename__ = 'balances'
+class BalanceHistory(Base):
+    __tablename__ = 'balance_history'
 
-    blnc_id = Column(Integer, Identity(start=1), primary_key=True)
-    tg_tg_id = Column(Integer, ForeignKey("bot_users.tg_id"), nullable=False)
+    bhist_id = Column(Integer, Identity(start=1), primary_key=True)
+    blnc_blnc_id = Column(Integer, ForeignKey("balances.blnc_id"), nullable=False)
     amount = Column(Numeric(precision=10, scale=2), default=0.00)
+    update_value = Column(Numeric(precision=10, scale=2), default=0.00)
     curr_curr_id = Column(Integer, ForeignKey("currencies.curr_id"), nullable=False)
-    create_date = Column(DateTime, default=datetime.now())
     change_date = Column(DateTime, default=datetime.now())
-    user = relationship("Users", back_populates="balance")
-    balance_history = relationship("BalanceHistory", back_populates="balance")
+    balance = relationship("Balances", back_populates="balance_history")

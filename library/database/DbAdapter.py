@@ -1,9 +1,10 @@
+import shlex
 from datetime import datetime, date
 from sqlalchemy import create_engine, func
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.exc import NoResultFound
 from library.database.models import Base
-from library.database.models.schema import Balances, Currencies, ExchangeRates, Users
+from library.database.models.schema import Balances, Currencies, ExchangeRates, Users, BalanceHistory
 import decimal
 
 
@@ -52,6 +53,7 @@ class DbAdapter:
             try:
                 s.query(Users).filter(Users.tg_id == admin_id).one()
             except NoResultFound:
+                operation_date = datetime.now()
                 admin = Users(
                     tg_id=admin_id,
                     user_name=admin_name,
@@ -60,9 +62,27 @@ class DbAdapter:
                 s.add(admin)
                 admin_balance = Balances(
                     tg_tg_id=admin_id,
-                    curr_curr_id=1
+                    curr_curr_id=1,
+                    create_date=operation_date,
+                    change_date=operation_date
+
                 )
                 s.add(admin_balance)
+                blnc = s.query(Balances).filter(
+                    Balances.tg_tg_id == admin_id,
+                    Balances.curr_curr_id == 1,
+                    Balances.create_date == operation_date,
+                    Balances.change_date == operation_date
+                ).one()
+
+                balance_history = BalanceHistory(
+                    blnc_blnc_id=blnc.blnc_id,
+                    curr_curr_id=blnc.curr_curr_id,
+                    change_date=blnc.change_date
+                )
+
+                s.add(balance_history)
+
             finally:
                 s.commit()
 
@@ -87,6 +107,7 @@ class DbAdapter:
     def update_balance(self, telegram_id, curr_short, amount):
         with self.get_session() as s:
             try:
+                operation_date = datetime.now()
                 blnc = s.query(
                     Balances
                 ).filter(
@@ -96,18 +117,47 @@ class DbAdapter:
                 ).one()
 
                 blnc.amount += decimal.Decimal(amount)
-                blnc.change_date = datetime.now()
+                blnc.change_date = operation_date
+
+                blnc_history = BalanceHistory(
+                    blnc_blnc_id=blnc.blnc_id,
+                    curr_curr_id=blnc.curr_curr_id,
+                    change_date=operation_date,
+                    amount=blnc.amount,
+                    update_value=amount
+                )
+
+                s.add(blnc_history)
 
             except NoResultFound:
-                curr_id = s.query(Currencies.curr_id).filter(
-                    Currencies.currency_short_name == curr_short
-                ).one()
-                blnc = Balances(
-                    tg_tg_id=telegram_id,
-                    amount=decimal.Decimal(amount),
-                    curr_curr_id=curr_id[0]
-                )
-                s.add(blnc)
+                try:
+                    curr_id = s.query(Currencies.curr_id).filter(
+                        Currencies.currency_short_name == curr_short.upper()
+                    ).one()
+                    blnc = Balances(
+                        tg_tg_id=telegram_id,
+                        amount=decimal.Decimal(amount),
+                        curr_curr_id=curr_id[0]
+                    )
+                    s.add(blnc)
+
+
+                    blnc = s.query(Balances).filter(
+                        Balances.tg_tg_id==telegram_id,
+                        Balances.curr_curr_id==curr_id[0]
+                    ).one()
+
+                    blnc_history = BalanceHistory(
+                        blnc_blnc_id=blnc.blnc_id,
+                        curr_curr_id=blnc.curr_curr_id,
+                        change_date=operation_date,
+                        amount=blnc.amount,
+                        update_value=amount
+                    )
+
+                    s.add(blnc_history)
+                except Exception as err:
+                    print(err)
             finally:
                 s.commit()
 
@@ -180,20 +230,41 @@ class DbAdapter:
                 s.commit()
 
     def create_user(self, user_name, user_tg_id, admin_yn):
+        operation_date = datetime.now()
         with self.get_session() as s:
             user = Users(
                 tg_id=user_tg_id,
                 user_name=user_name,
-                admin_yn=admin_yn
+                admin_yn=admin_yn,
+                create_date=operation_date
             )
             s.add(user)
             user_balance = Balances(
                 tg_tg_id=user_tg_id,
-                curr_curr_id=1
+                curr_curr_id=1,
+                create_date=operation_date,
+                change_date=operation_date
             )
             s.add(user_balance)
-            s.commit()
 
+            try:
+                user_balance = s.query(Balances).filter(
+                    Balances.tg_tg_id==user_tg_id,
+                    Balances.curr_curr_id==1
+                ).one()
+
+                balance_hist = BalanceHistory(
+                        blnc_blnc_id=user_balance.blnc_id,
+                        curr_curr_id=user_balance.curr_curr_id,
+                        change_date=operation_date,
+                        amount=user_balance.amount
+                    )
+
+                s.add(balance_hist)
+
+                s.commit()
+            except Exception as err:
+                print(err)
         return True
 
     def drop_user(self, telegram_id):
@@ -201,9 +272,12 @@ class DbAdapter:
             try:
                 # get objects
                 balances = s.query(Balances).filter_by(tg_tg_id=telegram_id).all()
+                balance_history = s.query(BalanceHistory).filter_by(blnc_blnc_id=balances[0].blnc_id).all()
                 user = s.query(Users).filter_by(tg_id=telegram_id).one()
 
                 # delete objects
+                for hist in balance_history:
+                    s.delete(hist)
                 for balance in balances:
                     s.delete(balance)
 
@@ -214,3 +288,23 @@ class DbAdapter:
                 print(err)
                 return False
         return True
+
+    def get_balance_history(self, telegram_id, currency):
+        with self.get_session() as s:
+            try:
+                result = s.query(
+                    BalanceHistory
+                ).join(
+                    Balances
+                ).join(
+                    Currencies
+                ).filter(
+                    Balances.tg_tg_id == telegram_id,
+                    Currencies.currency_short_name == currency
+                ).order_by(
+                    BalanceHistory.change_date.desc()
+                ).all()
+            except Exception as err:
+                print(err)
+
+        return result
