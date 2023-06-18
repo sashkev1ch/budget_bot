@@ -66,18 +66,21 @@ class BotClient:
         user = self.check_cache(update.message.from_user.id)
 
         if user and amount:
-            self._db.update_balance(
+            result, err = self._db.update_balance(
                 telegram_id=user.tg_id,
                 curr_short=DEFAULT_CURRENCY,
                 amount=amount
             )
-            balance = self._get_balance_str(user.tg_id)
-            reply = f"{DEFAULT_CURRENCY} balance updated for {amount}\r\n{balance}"
+            if not err:
+                reply = f"{DEFAULT_CURRENCY} balance updated for {amount}\r\n" \
+                        f"{self._get_balance_str(user.tg_id)}"
+            else:
+                reply = f"{DEFAULT_EXCEPTION_REPLY}: {err}"
 
             await update.message.reply_text(reply)
 
     def update_cache(self):
-        self._cache_users = self._db.get_bot_users()
+        self._cache_users, err = self._db.get_bot_users()
 
     def check_cache(self, telegram_id):
         for user in self._cache_users:
@@ -86,15 +89,13 @@ class BotClient:
         return None
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if update.message.from_user.id == self._admin:
-            admin_name = update.message.from_user.first_name
-            print(update.message.text)
-            # print(admin_name)
-            await update.message.reply_text(f"Hi {admin_name}")
+        user = self.check_cache(update.message.from_user.id)
+        if user:
+            await update.message.reply_text(f"Hi {user.name}")
 
     async def add(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user = self.check_cache(update.message.from_user.id)
-        reply = DEFAULT_EXCEPTION_REPLY
+        reply = ""
         if user:
             cmd_args = context.args
 
@@ -105,49 +106,70 @@ class BotClient:
                 except IndexError:
                     currency = DEFAULT_CURRENCY
 
-                self._db.update_balance(
+                result, err = self._db.update_balance(
                     telegram_id=user.tg_id,
                     curr_short=currency,
                     amount=amount
                 )
-                balance = self._get_balance_str(user.tg_id)
-                reply = f"added {amount} {currency}\r\n{balance}"
+
+                if not err:
+                    reply += f"subtracted {amount} {currency}\r\n"
+                    reply += self._get_balance_str(user.tg_id)
+                else:
+                    reply = f"{DEFAULT_EXCEPTION_REPLY}: {err}"
 
             except IndexError:
                 reply = f"not enough arguments: {cmd_args}"
 
-        await update.message.reply_text(f"{reply}")
+        await update.message.reply_text(reply)
 
     async def sub(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply = ""
         user = self.check_cache(update.message.from_user.id)
         if user:
             cmd_args = context.args
-            if len(cmd_args) == 2:
-                self._db.update_balance(
+            try:
+                amount = float(cmd_args[0])
+                try:
+                    currency = cmd_args[1].upper()
+                except IndexError:
+                    currency = DEFAULT_CURRENCY
+
+                result, err = self._db.update_balance(
                     telegram_id=user.tg_id,
-                    curr_short=cmd_args[1].upper(),
-                    amount=-float(cmd_args[0])
+                    curr_short=currency,
+                    amount=-amount
                 )
-                reply += f"subtracted {cmd_args[0]} {cmd_args[1]}\r\n"
-                reply += self._get_balance_str(user.tg_id)
-            else:
-                reply += f"not enough arguments: {cmd_args}"
-        else:
-            reply += f"unknown user: {update.message.from_user}"
+                if not err:
+                    reply += f"subtracted {amount} {currency}\r\n"
+                    reply += self._get_balance_str(user.tg_id)
+                else:
+                    reply = f"{DEFAULT_EXCEPTION_REPLY}: {err}"
+
+            except IndexError:
+                reply = f"not enough arguments: {cmd_args}"
 
         await update.message.reply_text(f"{reply}")
 
     def _get_balance_str(self, telegram_id):
-        text = ""
-        user_balance = self._db.get_balance(telegram_id)
-        for i, blnc in enumerate(user_balance, 1):
-            text += f"{i}. {blnc[1]} {blnc[2]}\r\n"
-        return text
+        reply = ""
+        user_balance, err = self._db.get_balance(telegram_id)
+        if not err:
+            for i, blnc in enumerate(user_balance, 1):
+                reply += f"{i}. {blnc[1]} {blnc[2]}\r\n"
+        else:
+            reply = f"{DEFAULT_EXCEPTION_REPLY}: {err}"
+
+        return reply
 
     def _get_currencies_str(self):
-        currencies = self._db.get_currencies()
-        return ", ".join([f"{i[0]}" for i in currencies])
+        currencies, err = self._db.get_currencies()
+        if not err:
+            reply = ", ".join([f"{i[0]}" for i in currencies])
+        else:
+            reply = f"{DEFAULT_EXCEPTION_REPLY}: {err}"
+
+        return reply
 
     async def balance(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user = self.check_cache(update.message.from_user.id)
@@ -182,7 +204,7 @@ class BotClient:
 
     async def add_user(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user = self.check_cache(update.message.from_user.id)
-        if user and user.tg_id == self._admin:
+        if user and user.admin_yn == 'Y':
             try:
                 new_user_name = context.args[0]
                 new_user_tg_id = context.args[1]
@@ -192,21 +214,40 @@ class BotClient:
                 except IndexError:
                     new_user_adm = 'N'
 
-                if self._db.create_user(new_user_name, new_user_tg_id, new_user_adm):
+                result, err = self._db.create_user(new_user_name, new_user_tg_id, new_user_adm)
+
+                if not err:
                     self.update_cache()
                     reply = f"new user {new_user_name} created"
                 else:
-                    reply = DEFAULT_EXCEPTION_REPLY
+                    reply = f"{DEFAULT_EXCEPTION_REPLY}: {err}"
 
             except IndexError:
                 reply = "No user name passed"
 
             await update.message.reply_text(reply)
 
+    async def del_user(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user = self.check_cache(update.message.from_user.id)
+        if user and user.admin_yn == 'Y':
+            try:
+                user_tg_id = int(context.args[0])
+                result, err = self._db.drop_user(user_tg_id)
+                if not err:
+                    self.update_cache()
+                    reply = "User dropped"
+                else:
+                    reply = f"{DEFAULT_EXCEPTION_REPLY}: {err}: "
+
+            except IndexError:
+                reply = "No Telegram Id passed"
+
+            await update.message.reply_text(reply)
+
     async def show_users(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user = self.check_cache(update.message.from_user.id)
-        if user and user.tg_id == self._admin:
-            users = self._db.get_bot_users()
+        if user and user.admin_yn == 'Y':
+            users, err = self._db.get_bot_users()
             reply = ''.join(
                 [
                     f"{i} || "
@@ -218,22 +259,6 @@ class BotClient:
             )
             await update.message.reply_text(reply)
 
-    async def del_user(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        user = self.check_cache(update.message.from_user.id)
-        if user and user.admin_yn == 'Y':
-            try:
-                user_tg_id = int(context.args[0])
-                if self._db.drop_user(user_tg_id):
-                    self.update_cache()
-                    reply = "User dropped"
-                else:
-                    reply = DEFAULT_EXCEPTION_REPLY
-
-            except IndexError:
-                reply = "No Telegram Id passed"
-
-            await update.message.reply_text(reply)
-
     async def get_balance_history(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user = self.check_cache(update.message.from_user.id)
         if user:
@@ -242,19 +267,22 @@ class BotClient:
             except IndexError:
                 currency = DEFAULT_CURRENCY
 
-            balances = self._db.get_balance_history(user.tg_id, currency)
-            history = [
-                (
-                    balance.change_date,
-                    balance.update_value,
-                    balance.amount
+            balances, err = self._db.get_balance_history(user.tg_id, currency)
+            if not err:
+                history = [
+                    (
+                        balance.change_date,
+                        balance.update_value,
+                        balance.amount
+                    )
+                    for balance in balances
+                ]
+                file_path = Path(__file__).parent.resolve() /'..' / 'budget_reports' / 'budget.xlsx'
+                make_excel(file_path, history)
+                budget_file = open(file_path, 'rb')
+                await context.bot.send_document(
+                    chat_id=user.tg_id,
+                    document=budget_file
                 )
-                for balance in balances
-            ]
-            file_path = Path(__file__).parent.resolve() /'..' / 'budget_reports' / 'budget.xlsx'
-            make_excel(file_path, history)
-            budget_file = open(file_path, 'rb')
-            await context.bot.send_document(
-                chat_id=user.tg_id,
-                document=budget_file
-            )
+            else:
+                await update.message.reply_text(f'{DEFAULT_EXCEPTION_REPLY}: {err}')

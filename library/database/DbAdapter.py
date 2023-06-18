@@ -6,6 +6,7 @@ from sqlalchemy.exc import NoResultFound
 from library.database.models import Base
 from library.database.models.schema import Balances, Currencies, ExchangeRates, Users, BalanceHistory
 import decimal
+from ..utils import i_execute
 
 
 class DbAdapter:
@@ -86,6 +87,7 @@ class DbAdapter:
             finally:
                 s.commit()
 
+    @i_execute
     def get_bot_users(self):
         with self.get_session() as s:
             result = s.query(Users).all()
@@ -104,6 +106,7 @@ class DbAdapter:
 
         return result > 0
 
+    @i_execute
     def update_balance(self, telegram_id, curr_short, amount):
         with self.get_session() as s:
             try:
@@ -130,37 +133,36 @@ class DbAdapter:
                 s.add(blnc_history)
 
             except NoResultFound:
-                try:
-                    curr_id = s.query(Currencies.curr_id).filter(
-                        Currencies.currency_short_name == curr_short.upper()
-                    ).one()
-                    blnc = Balances(
-                        tg_tg_id=telegram_id,
-                        amount=decimal.Decimal(amount),
-                        curr_curr_id=curr_id[0]
-                    )
-                    s.add(blnc)
+                curr_id = s.query(Currencies.curr_id).filter(
+                    Currencies.currency_short_name == curr_short.upper()
+                ).one()
+                blnc = Balances(
+                    tg_tg_id=telegram_id,
+                    amount=decimal.Decimal(amount),
+                    curr_curr_id=curr_id[0]
+                )
+                s.add(blnc)
 
 
-                    blnc = s.query(Balances).filter(
-                        Balances.tg_tg_id==telegram_id,
-                        Balances.curr_curr_id==curr_id[0]
-                    ).one()
+                blnc = s.query(Balances).filter(
+                    Balances.tg_tg_id==telegram_id,
+                    Balances.curr_curr_id==curr_id[0]
+                ).one()
 
-                    blnc_history = BalanceHistory(
-                        blnc_blnc_id=blnc.blnc_id,
-                        curr_curr_id=blnc.curr_curr_id,
-                        change_date=operation_date,
-                        amount=blnc.amount,
-                        update_value=amount
-                    )
+                blnc_history = BalanceHistory(
+                    blnc_blnc_id=blnc.blnc_id,
+                    curr_curr_id=blnc.curr_curr_id,
+                    change_date=operation_date,
+                    amount=blnc.amount,
+                    update_value=amount
+                )
 
-                    s.add(blnc_history)
-                except Exception as err:
-                    print(err)
+                s.add(blnc_history)
+
             finally:
                 s.commit()
 
+    @i_execute
     def get_balance(self, telegram_id):
         with self.get_session() as s:
             result = s.query(
@@ -176,6 +178,7 @@ class DbAdapter:
 
         return result
 
+    @i_execute
     def get_currencies(self):
         with self.get_session() as s:
             result = s.query(
@@ -229,6 +232,7 @@ class DbAdapter:
                 s.add(rate)
                 s.commit()
 
+    @i_execute
     def create_user(self, user_name, user_tg_id, admin_yn):
         operation_date = datetime.now()
         with self.get_session() as s:
@@ -247,64 +251,54 @@ class DbAdapter:
             )
             s.add(user_balance)
 
-            try:
-                user_balance = s.query(Balances).filter(
-                    Balances.tg_tg_id==user_tg_id,
-                    Balances.curr_curr_id==1
-                ).one()
+            user_balance = s.query(Balances).filter(
+                Balances.tg_tg_id == user_tg_id,
+                Balances.curr_curr_id == 1
+            ).one()
 
-                balance_hist = BalanceHistory(
-                        blnc_blnc_id=user_balance.blnc_id,
-                        curr_curr_id=user_balance.curr_curr_id,
-                        change_date=operation_date,
-                        amount=user_balance.amount
-                    )
+            balance_hist = BalanceHistory(
+                    blnc_blnc_id=user_balance.blnc_id,
+                    curr_curr_id=user_balance.curr_curr_id,
+                    change_date=operation_date,
+                    amount=user_balance.amount
+                )
 
-                s.add(balance_hist)
+            s.add(balance_hist)
 
-                s.commit()
-            except Exception as err:
-                print(err)
-        return True
+            s.commit()
 
+    @i_execute
     def drop_user(self, telegram_id):
         with self.get_session() as s:
-            try:
-                # get objects
-                balances = s.query(Balances).filter_by(tg_tg_id=telegram_id).all()
-                balance_history = s.query(BalanceHistory).filter_by(blnc_blnc_id=balances[0].blnc_id).all()
-                user = s.query(Users).filter_by(tg_id=telegram_id).one()
+            # get objects
+            balances = s.query(Balances).filter_by(tg_tg_id=telegram_id).all()
+            balance_history = s.query(BalanceHistory).filter_by(blnc_blnc_id=balances[0].blnc_id).all()
+            user = s.query(Users).filter_by(tg_id=telegram_id).one()
 
-                # delete objects
-                for hist in balance_history:
-                    s.delete(hist)
-                for balance in balances:
-                    s.delete(balance)
+            # delete objects
+            for hist in balance_history:
+                s.delete(hist)
+            for balance in balances:
+                s.delete(balance)
 
-                s.delete(user)
+            s.delete(user)
 
-                s.commit()
-            except Exception as err:
-                print(err)
-                return False
-        return True
+            s.commit()
 
+    @i_execute
     def get_balance_history(self, telegram_id, currency):
         with self.get_session() as s:
-            try:
-                result = s.query(
-                    BalanceHistory
-                ).join(
-                    Balances
-                ).join(
-                    Currencies
-                ).filter(
-                    Balances.tg_tg_id == telegram_id,
-                    Currencies.currency_short_name == currency
-                ).order_by(
-                    BalanceHistory.change_date.desc()
-                ).all()
-            except Exception as err:
-                print(err)
+            result = s.query(
+                BalanceHistory
+            ).join(
+                Balances
+            ).join(
+                Currencies
+            ).filter(
+                Balances.tg_tg_id == telegram_id,
+                Currencies.currency_short_name == currency
+            ).order_by(
+                BalanceHistory.change_date.desc()
+            ).all()
 
         return result
